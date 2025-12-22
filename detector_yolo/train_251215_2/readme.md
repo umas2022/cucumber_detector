@@ -1,0 +1,1 @@
+- 标注head和tail两点改为相同的endpoint两点
