@@ -10,16 +10,16 @@ import os
 
 # 预设颜色类别（HSV 范围 + 最小占比/面积）
 COLOR_CLASSES = {
-    # "green": {  # 黄瓜、青菜
-    #     "hsv_lower": (30, 20, 20),
-    #     "hsv_upper": (90, 255, 255),
-    #     "min_area": 500
-    # },
-    "red_orange": {  # 番茄、胡萝卜（注意红色在HSV中跨0度，这里简化处理）
-        "hsv_lower": (0, 50, 50),
-        "hsv_upper": (20, 255, 255),
+    "green": {  # 黄瓜、青菜
+        "hsv_lower": (30, 20, 20),
+        "hsv_upper": (90, 255, 255),
         "min_area": 500
     },
+    # "red_orange": {  # 番茄、胡萝卜（注意红色在HSV中跨0度，这里简化处理）
+    #     "hsv_lower": (0, 50, 50),
+    #     "hsv_upper": (20, 255, 255),
+    #     "min_area": 500
+    # },
     # "yellow": {  # 香蕉
     #     "hsv_lower": (15, 80, 80),
     #     "hsv_upper": (35, 255, 255),
@@ -156,7 +156,7 @@ def detect_fruit_endpoints(
 # 示例用法
 # -------------------------
 if __name__ == "__main__":
-    res = detect_fruit_endpoints("2025-12-19-095730.jpg", debug=True)
+    res = detect_fruit_endpoints("./img/2025-12-25-105108.jpg", debug=True)
     if res["success"]:
         print(f"检测成功！类别: {res['class_name']}")
         print(f"Head: {res['head']}, Tail: {res['tail']}")

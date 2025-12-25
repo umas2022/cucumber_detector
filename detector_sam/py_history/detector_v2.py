@@ -1,5 +1,6 @@
 '''
 增加过滤规则：【绿色+长度小于阈值】，用于过滤萝卜叶
+pip install ultralytics pyopencv numpy
 '''
 import cv2
 import numpy as np
@@ -25,10 +26,10 @@ COLOR_CLASSES = {
         "hsv_upper": (35, 255, 255),
         "min_ratio": 0.25
     },
-        "purple": { 
-        "hsv_lower": (150, 30, 20),  
-        "hsv_upper": (255, 255, 255), 
-        "min_ratio": 0.25 
+    "purple": {
+        "hsv_lower": (150, 30, 20),
+        "hsv_upper": (255, 255, 255),
+        "min_ratio": 0.25
     }
 }
 
@@ -96,7 +97,8 @@ class ProduceDetector:
                 continue
 
             # ---- 主轴、端点、宽度 ----
-            head, tail, axis, center, width = self._axis_endpoints_and_width(mask_bool)
+            head, tail, axis, center, width = self._axis_endpoints_and_width(
+                mask_bool)
 
             # ---- 计算长度 ----
             length = float(np.linalg.norm(head - tail))
@@ -217,7 +219,8 @@ class ProduceDetector:
             "red": (0, 0, 255),
             "yellow": (0, 255, 255)
         }
-        color = np.array(color_map.get(class_name, (255, 255, 255)), dtype=np.uint8)
+        color = np.array(color_map.get(
+            class_name, (255, 255, 255)), dtype=np.uint8)
 
         # mask
         vis_img[mask_bool] = vis_img[mask_bool] * 0.5 + color * 0.5
@@ -245,7 +248,7 @@ if __name__ == "__main__":
     )
 
     # result = detector.detect("./img/2025-12-19-095730.jpg", visualize=True)
-    result = detector.detect("./img/2025-12-19-095745.jpg", visualize=True)
+    result = detector.detect("./img/2025-12-25-105108.jpg", visualize=True)
 
     if result["success"]:
         for i, obj in enumerate(result["objects"]):

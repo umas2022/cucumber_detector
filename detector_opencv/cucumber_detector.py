@@ -122,7 +122,7 @@ def detect_cucumber_endpoints(
 # -------------------------
 if __name__ == "__main__":
     # 测试单张图
-    res = detect_cucumber_endpoints("2025-12-15-193028.jpg", debug=True)
+    res = detect_cucumber_endpoints("./img/2025-12-25-105108.jpg", debug=True)
     if res["success"]:
         print(f"Head: {res['head']}, Tail: {res['tail']}")
         cv2.imshow("Debug", res["debug_info"]["debug_image"])
