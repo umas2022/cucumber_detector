@@ -1,3 +1,8 @@
+'''
+蓝色筐子意外的区域添加黑色遮罩
+python>=3.10
+pip install opencv-python numpy ultralytics
+'''
 import cv2
 import numpy as np
 import time
@@ -5,7 +10,14 @@ from ultralytics import SAM
 from target_specs import TARGET_SPECS
 
 
-class ProduceSystemV4_2:
+import cv2
+import numpy as np
+import time
+from ultralytics import SAM
+from target_specs import TARGET_SPECS
+
+
+class ProduceSystemV5_BoxAware:
 
     def __init__(
         self,
@@ -19,8 +31,47 @@ class ProduceSystemV4_2:
         self.max_area_ratio = max_area_ratio
         self.edge_margin_ratio = edge_margin_ratio
 
-    # --------------------------------------------------
+    # ==================================================
+    # 对外主接口（推荐用这个）
     def run(self, image, visualize=False):
+        return self.detect_in_box(image, visualize)
+
+    # ==================================================
+    # 第一阶段 + 第二阶段整合
+    def detect_in_box(self, image, visualize=False):
+
+        # ---------- 第 1 次检测：找 box ----------
+        first = self.detect_all(image, visualize=False)
+
+        boxes = [o for o in first["objects"] if o["type"] == "box"]
+        if not boxes:
+            return {
+                "success": False,
+                "objects": [],
+                "reason": "no box detected"
+            }
+
+        box = boxes[0]  # 默认只有一个框
+
+        # ---------- 抹掉框外 ----------
+        boxed_img, box_mask = self._mask_outside_box(image, box["corners"])
+
+        # ---------- 第 2 次检测：只找蔬菜 ----------
+        second = self.detect_all(boxed_img, visualize=visualize)
+
+        # 过滤掉 box 本身
+        produce = [o for o in second["objects"] if o["type"] != "box"]
+
+        return {
+            "success": len(produce) > 0,
+            "box": box,
+            "objects": produce,
+            "vis_image": second.get("vis_image")
+        }
+
+    # ==================================================
+    # 原始完整检测逻辑（几乎等同你 V4_2 的 run）
+    def detect_all(self, image, visualize=False):
         H, W = image.shape[:2]
         long_side = max(H, W)
         img_area = H * W
@@ -33,7 +84,7 @@ class ProduceSystemV4_2:
         sam_time = time.time() - t0
 
         if results[0].masks is None:
-            return {"success": False, "objects": []}
+            return {"objects": []}
 
         masks = results[0].masks.data.cpu().numpy()
         boxes = results[0].boxes.xyxy.cpu().numpy()
@@ -58,7 +109,6 @@ class ProduceSystemV4_2:
                 "mask": mask
             }
 
-            # box 特殊处理：四角
             if obj["type"] == "box":
                 obj.update(self._compute_box_corners(mask))
 
@@ -68,13 +118,26 @@ class ProduceSystemV4_2:
                 self._draw(vis, obj)
 
         return {
-            "success": len(objects) > 0,
             "objects": objects,
             "sam_time": sam_time,
             "vis_image": vis.astype(np.uint8) if visualize else None
         }
 
-    # --------------------------------------------------
+    # ==================================================
+    # 抹掉框外
+    def _mask_outside_box(self, image, corners):
+        h, w = image.shape[:2]
+        mask = np.zeros((h, w), np.uint8)
+
+        pts = np.array(corners, dtype=np.int32)
+        cv2.fillPoly(mask, [pts], 255)
+
+        result = image.copy()
+        result[mask == 0] = (0, 0, 0)   # 或 (128,128,128)
+
+        return result, mask
+
+    # ==================================================
     def _basic_filter(self, mask, box, H, W, img_area):
         area_ratio = mask.sum() / img_area
         if area_ratio < self.min_area_ratio or area_ratio > self.max_area_ratio:
@@ -87,8 +150,7 @@ class ProduceSystemV4_2:
 
         return True
 
-    # --------------------------------------------------
-    # 主轴 / 头尾（用于蔬菜）
+    # ==================================================
     def _compute_geometry(self, mask, long_side, img_area):
         ys, xs = np.where(mask)
         pts = np.stack([xs, ys], axis=1).astype(np.float32)
@@ -100,14 +162,10 @@ class ProduceSystemV4_2:
         axis = vt[0]
 
         proj = centered @ axis
-        i_min = np.argmin(proj)
-        i_max = np.argmax(proj)
-
-        head = pts[i_min]
-        tail = pts[i_max]
+        head = pts[np.argmin(proj)]
+        tail = pts[np.argmax(proj)]
 
         length = proj.max() - proj.min()
-
         normal = np.array([-axis[1], axis[0]])
         width = np.percentile(centered @ normal, 90) - np.percentile(centered @ normal, 10)
 
@@ -122,37 +180,27 @@ class ProduceSystemV4_2:
             "area_ratio": float(mask.sum() / img_area)
         }
 
-    # --------------------------------------------------
-    # box 四角
+    # ==================================================
     def _compute_box_corners(self, mask):
         ys, xs = np.where(mask)
         pts = np.stack([xs, ys], axis=1).astype(np.int32)
 
-        # 1. 凸包（真实外轮廓）
         hull = cv2.convexHull(pts)
-
-        # 2. 多边形近似
         peri = cv2.arcLength(hull, True)
         approx = cv2.approxPolyDP(hull, 0.02 * peri, True)
 
-        # 3. 理想情况：4 个点（梯形 / 四边形）
         if len(approx) == 4:
             corners = approx.reshape(-1, 2)
-
         else:
-            # fallback：最小外接矩形（极端失败情况）
             rect = cv2.minAreaRect(pts.astype(np.float32))
             corners = cv2.boxPoints(rect).astype(int)
 
-        center = tuple(np.mean(corners, axis=0).astype(int))
-
         return {
-            "box_center": center,
-            "corners": [tuple(p) for p in corners]
+            "corners": [tuple(p) for p in corners],
+            "box_center": tuple(np.mean(corners, axis=0).astype(int))
         }
 
-
-    # --------------------------------------------------
+    # ==================================================
     def _classify(self, mask, geom, hsv):
         candidates = []
 
@@ -170,28 +218,29 @@ class ProduceSystemV4_2:
         name, t, r = max(candidates, key=lambda x: x[2])
         return {"type": t, "subtype": name, "color_ratio": r}
 
-    # --------------------------------------------------
+    # ==================================================
     def _geometry_pass(self, geom, rule):
-        if "min_length_ratio" in rule and geom["length_ratio"] < rule["min_length_ratio"]:
-            return False
-        if "max_length_ratio" in rule and geom["length_ratio"] > rule["max_length_ratio"]:
-            return False
-        if "min_aspect" in rule and geom["aspect"] < rule["min_aspect"]:
-            return False
-        if "max_width_ratio" in rule and geom["width_ratio"] > rule["max_width_ratio"]:
-            return False
-        if "min_area_ratio" in rule and geom["area_ratio"] < rule["min_area_ratio"]:
-            return False
+        for k, v in rule.items():
+            if k == "min_length_ratio" and geom["length_ratio"] < v:
+                return False
+            if k == "max_length_ratio" and geom["length_ratio"] > v:
+                return False
+            if k == "min_aspect" and geom["aspect"] < v:
+                return False
+            if k == "max_width_ratio" and geom["width_ratio"] > v:
+                return False
+            if k == "min_area_ratio" and geom["area_ratio"] < v:
+                return False
         return True
 
-    # --------------------------------------------------
+    # ==================================================
     def _color_ratio(self, mask, hsv, cfg):
         lower = np.array(cfg["lower"], np.uint8)
         upper = np.array(cfg["upper"], np.uint8)
         color_mask = cv2.inRange(hsv, lower, upper)
         return (color_mask[mask] > 0).sum() / mask.sum()
 
-    # --------------------------------------------------
+    # ==================================================
     def _draw(self, img, obj):
         colors = {
             "cucumber": (0, 255, 0),
@@ -202,22 +251,15 @@ class ProduceSystemV4_2:
         c = np.array(colors.get(obj["subtype"], (255, 255, 255)), np.uint8)
         img[obj["mask"]] = img[obj["mask"]] * 0.5 + c * 0.5
 
-        # ---- box：画四角 ----
         if obj["type"] == "box":
             for p in obj["corners"]:
                 cv2.circle(img, p, 6, (255, 255, 255), -1)
-
             for i in range(4):
-                cv2.line(
-                    img,
-                    obj["corners"][i],
-                    obj["corners"][(i + 1) % 4],
-                    (255, 255, 255),
-                    2
-                )
+                cv2.line(img, obj["corners"][i],
+                         obj["corners"][(i + 1) % 4],
+                         (255, 255, 255), 2)
             return
 
-        # ---- 蔬菜：头尾 + 轴 ----
         cv2.circle(img, obj["center"], 5, (255, 255, 255), -1)
         cv2.circle(img, obj["head"], 6, (0, 0, 255), -1)
         cv2.circle(img, obj["tail"], 6, (255, 0, 0), -1)
@@ -226,26 +268,42 @@ class ProduceSystemV4_2:
 
 # ==================================================
 if __name__ == "__main__":
-    img = cv2.imread("./img/2025-12-25-105142.jpg")
+    # img = cv2.imread("./img/2025-12-25-105108.jpg")
+    # img = cv2.imread("./img/2025-12-25-105142.jpg")
+    # img = cv2.imread("./img/2025-12-25-105214.jpg")
+    img = cv2.imread("./img/2025-12-25-105257.jpg")
+    # img = cv2.imread("./img/2025-12-25-105257_m.jpg")
+
     if img is None:
         raise RuntimeError("Failed to load image")
 
-    system = ProduceSystemV4_2(
+    system = ProduceSystemV5_BoxAware(
         sam_model_path="sam2.1_b.pt"
     )
 
     result = system.run(img, visualize=True)
 
-    print(f"SAM inference time: {result['sam_time']:.3f}s")
+    # ---------- 蓝色筐子 ----------
+    box = result["box"]
+    corners = box["corners"]
+    box_center = box["box_center"]
 
+    print("\n=== BOX ===")
+    print("center:", box_center)
+    print("corners:")
+    for i, p in enumerate(corners):
+        print(f"  {i}: {p}")
+
+    # ---------- 蔬菜 ----------
+    print("\n=== PRODUCE ===")
     for i, obj in enumerate(result["objects"]):
         print(
             f"[{i}] type={obj['type']} "
             f"subtype={obj['subtype']} "
-            f"center={obj.get('center')} "
-            f"head={obj.get('head')} "
-            f"tail={obj.get('tail')} "
-            f"corners={obj.get('corners')}"
+            f"center={obj['center']} "
+            f"head={obj['head']} "
+            f"tail={obj['tail']} "
+            f"aspect={obj['aspect']:.2f}"
         )
 
     if result["vis_image"] is not None:
